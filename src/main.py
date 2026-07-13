@@ -11,7 +11,7 @@ def main():
     # Caminhos de arquivos
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_path = os.path.join(base_dir, 'data', 'LidDrivenCavityFlow_Re_1000.dat')
-    artifact_dir = os.path.join(base_dir, 'sim_results')
+    artifact_dir = os.path.join(base_dir, 'results')
     os.makedirs(artifact_dir, exist_ok=True)
 
     print("=== Inicializando Simulação CFD Transiente ===")
