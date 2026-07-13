@@ -8,4 +8,4 @@ dependencies:
   - pandas
   - scipy
   - matplotlib
-  - ipykernel
+  - pytest
