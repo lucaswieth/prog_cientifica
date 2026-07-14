@@ -1,100 +1,106 @@
 import os
 import sys
 
-# Garante que a pasta src esteja no sys.path para importações locais limpas
+# Ensure src is in the python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from config import SimulationConfig
+from utils import setup_logger, clean_results_dir
+from data_loader import VelocityDataLoader
 from malha import Malha
+from boundary_conditions import BoundaryConditions
+from advection_schemes import get_advection_scheme
 from solver import TransportSolver
+from post_processing import PostProcessor
 
 def main():
-    # Caminhos de arquivos
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_path = os.path.join(base_dir, 'data', 'LidDrivenCavityFlow_Re_1000.dat')
-    artifact_dir = os.path.join(base_dir, 'results')
-    os.makedirs(artifact_dir, exist_ok=True)
-
-    print("=== Inicializando Simulação CFD Transiente ===")
-    Nx, Ny = 40, 40
-    print(f"Resolução da malha: {Nx}x{Ny} volumes finitos")
+    config = SimulationConfig()
+    logger = setup_logger("CFDMain")
     
-    # 1. Carrega e gera a malha
-    grid = Malha(data_path, Nx=Nx, Ny=Ny, interp_method='linear')
+    logger.info("=== Initializing Transient CFD Simulation ===")
     
-    # 2. Configura as condições de contorno (Dirichlet)
-    bc_phi1 = {
-        'west': 0.0,
-        'east': 0.0,
-        'south': 1.0,
-        'north': 0.0
-    }
+    # Setup directories
+    clean_results_dir(config.results_dir, logger)
     
-    bc_phi2 = {
-        'west': 0.0,
-        'east': 0.0,
-        'south': 0.0,
-        'north': 1.0
-    }
+    # 1. Load Data
+    logger.info(f"Loading velocity data from {config.data_path}")
+    data_loader = VelocityDataLoader(config.data_path)
+    x_orig, y_orig, u_orig, v_orig = data_loader.load_data()
     
-    # 3. Bateria de Simulações Paramétricas
-    schemes = ['UDS', 'CDS']
-    k_values = [0.0, 0.5, 2.0]
+    # 2. Build Grid
+    logger.info(f"Building FVM grid with resolution {config.Nx}x{config.Ny}")
+    grid = Malha(x_orig, y_orig, u_orig, v_orig, config.Nx, config.Ny)
     
-    # Parâmetros Temporais
-    t_final = 8.0
-    dt = 0.1
+    # 3. Setup Boundary Conditions
+    bc_phi1 = BoundaryConditions.from_dict(config.bc_phi1)
+    bc_phi2 = BoundaryConditions.from_dict(config.bc_phi2)
     
-    for k in k_values:
-        # Armazenaremos os resultados finais para plotar o corte 1D comparativo
+    # 4. Parametric Runs
+    for k in config.k_values:
         resultados_finais_phi1 = {}
         resultados_finais_phi2 = {}
         
-        for scheme in schemes:
-            print(f"\n--- Resolvendo com o esquema: {scheme} | k = {k} ---")
+        for scheme_name in config.schemes:
+            logger.info(f"\n--- Solving Scheme: {scheme_name} | k = {k} ---")
             
-            # Instancia o solucionador
-            solver = TransportSolver(grid, scheme=scheme, gamma=0.001)
+            # Instantiate strategy
+            advection_scheme = get_advection_scheme(scheme_name)
             
-            # 1. Resolve para phi_2 (Reagente consumido, fonte na parede superior)
-            print("  Resolvendo para phi_2 (Reagente) no tempo...")
-            historico_phi2 = solver.resolver_transiente(bc_phi2, t_final=t_final, dt=dt, k=k, scalar_type='phi2')
-            resultados_finais_phi2[scheme] = historico_phi2[-1]
+            # Instantiate solver
+            solver = TransportSolver(grid, advection_scheme, config, logger)
             
-            # Gráficos finais e Animação phi_2
-            phi2_title = f"Escalar $\\phi_2$ ({scheme}, k={k})"
-            solver.plotar_resultados(historico_phi2[-1], phi2_title, save_path=os.path.join(artifact_dir, f"phi2_final_{scheme.lower()}_k{k}.png"))
-            print("  Gerando animação para phi_2...")
-            solver.gerar_animacao_temporal(historico_phi2, dt, phi2_title, save_path=os.path.join(artifact_dir, f"phi2_anim_{scheme.lower()}_k{k}.gif"))
+            # Solve for phi_2 (Reactant)
+            logger.info("Solving for phi_2 (Reactant)...")
+            historico_phi2 = solver.solve_transient(
+                bc_phi2, t_final=config.t_final, dt=config.dt, k=k, scalar_type='phi2'
+            )
+            resultados_finais_phi2[scheme_name] = historico_phi2[-1]
             
-            # 2. Resolve para phi_1 (Produto gerado, fonte na parede inferior)
-            print("  Resolvendo para phi_1 (Produto, usando phi_2 como fonte)...")
-            historico_phi1 = solver.resolver_transiente(bc_phi1, t_final=t_final, dt=dt, k=k, scalar_type='phi1', phi2_hist=historico_phi2)
-            resultados_finais_phi1[scheme] = historico_phi1[-1]
+            # Post-processing phi_2
+            phi2_title = f"Escalar $\\phi_2$ ({scheme_name}, k={k})"
+            PostProcessor.plotar_resultados(
+                historico_phi2[-1], grid, phi2_title, 
+                save_path=os.path.join(config.results_dir, f"phi2_final_{scheme_name.lower()}_k{k}.png")
+            )
+            logger.info("Generating animation for phi_2...")
+            PostProcessor.gerar_animacao_temporal(
+                historico_phi2, grid, config.dt, phi2_title, 
+                save_path=os.path.join(config.results_dir, f"phi2_anim_{scheme_name.lower()}_k{k}.gif")
+            )
             
-            # Gráficos finais e Animação phi_1
-            phi1_title = f"Escalar $\\phi_1$ ({scheme}, k={k})"
-            solver.plotar_resultados(historico_phi1[-1], phi1_title, save_path=os.path.join(artifact_dir, f"phi1_final_{scheme.lower()}_k{k}.png"))
-            print("  Gerando animação para phi_1...")
-            solver.gerar_animacao_temporal(historico_phi1, dt, phi1_title, save_path=os.path.join(artifact_dir, f"phi1_anim_{scheme.lower()}_k{k}.gif"))
+            # Solve for phi_1 (Product)
+            logger.info("Solving for phi_1 (Product)...")
+            historico_phi1 = solver.solve_transient(
+                bc_phi1, t_final=config.t_final, dt=config.dt, k=k, scalar_type='phi1', phi2_hist=historico_phi2
+            )
+            resultados_finais_phi1[scheme_name] = historico_phi1[-1]
             
-        # 3. Cortes 1D Comparativos (UDS vs CDS) para o k atual
-        print(f"\n  Gerando cortes 1D comparativos para k = {k}...")
-        TransportSolver.plotar_corte_1d(
-            phi_uds=resultados_finais_phi2['UDS'], 
-            phi_cds=resultados_finais_phi2['CDS'], 
-            grid=grid, 
-            title=f"Corte em X=0.5: Escalar $\\phi_2$ (k={k})", 
-            save_path=os.path.join(artifact_dir, f"corte_1d_phi2_k{k}.png")
+            # Post-processing phi_1
+            phi1_title = f"Escalar $\\phi_1$ ({scheme_name}, k={k})"
+            PostProcessor.plotar_resultados(
+                historico_phi1[-1], grid, phi1_title, 
+                save_path=os.path.join(config.results_dir, f"phi1_final_{scheme_name.lower()}_k{k}.png")
+            )
+            logger.info("Generating animation for phi_1...")
+            PostProcessor.gerar_animacao_temporal(
+                historico_phi1, grid, config.dt, phi1_title, 
+                save_path=os.path.join(config.results_dir, f"phi1_anim_{scheme_name.lower()}_k{k}.gif")
+            )
+            
+        # 1D Cuts (UDS vs CDS)
+        logger.info(f"Generating 1D comparative cuts for k = {k}...")
+        PostProcessor.plotar_corte_1d(
+            resultados_finais_phi2['UDS'], resultados_finais_phi2['CDS'], grid,
+            title=f"Corte em X=0.5: Escalar $\\phi_2$ (k={k})",
+            save_path=os.path.join(config.results_dir, f"corte_1d_phi2_k{k}.png")
         )
-        TransportSolver.plotar_corte_1d(
-            phi_uds=resultados_finais_phi1['UDS'], 
-            phi_cds=resultados_finais_phi1['CDS'], 
-            grid=grid, 
-            title=f"Corte em X=0.5: Escalar $\\phi_1$ (k={k})", 
-            save_path=os.path.join(artifact_dir, f"corte_1d_phi1_k{k}.png")
+        PostProcessor.plotar_corte_1d(
+            resultados_finais_phi1['UDS'], resultados_finais_phi1['CDS'], grid,
+            title=f"Corte em X=0.5: Escalar $\\phi_1$ (k={k})",
+            save_path=os.path.join(config.results_dir, f"corte_1d_phi1_k{k}.png")
         )
+        
+    logger.info("=== Simulations completed successfully! ===")
 
-    print("\n=== Simulações concluídas com sucesso! ===")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
