@@ -9,11 +9,11 @@ class SimulationConfig:
     """
     
     # Mesh resolution
-    Nx: int = 150
-    Ny: int = 150
+    Nx: int = 100
+    Ny: int = 100
     
     # Physical parameters
-    gamma: float = 0.001
+    gamma: float = 0.0005
     k_values: List[float] = field(default_factory=lambda: [0.0, 0.5, 2.0])
     
     # Time integration parameters

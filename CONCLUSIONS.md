@@ -1,40 +1,43 @@
-# Relatório Técnico de Validação de CFD
-**Análise de Transporte de Escalares Acoplados por Reação (Re = 1000)**
+# Conclusões da Auditoria CFD: A Disputa entre CDS e UDS
+**Análise Crítica de Transporte Acoplado por Reação (Re = 1000)**
 
 ## 1. Sumário Executivo
-A auditoria presente analisa os resultados com a configuração de alta resolução espacial (**malha 150x150**) e o restabelecimento da física original (**$\Gamma = 0.001$**). O comportamento macroscópico e termodinâmico dos escalares continua fisicamente válido e o solver temporal (Euler Implícito) operou com total estabilidade. O ganho de resolução reduziu dramaticamente a "falsa difusão" do esquema UDS. No entanto, por utilizarmos $\Gamma = 0.001$, o refinamento de malha alcançado ainda não foi suficiente para trazer o **Péclet celular máximo para menos de 2**. Como o limite de estabilidade é rompido ($Pe \approx 6.67$), o esquema CDS (Diferenças Centrais) ainda induz oscilações espúrias (wiggles) nas zonas de altos gradientes convectivos, embora essas oscilações sejam muito menores em amplitude do que na malha original 40x40.
+O experimento computacional realizado com a malha **100x100** e uma difusividade estrangulada para **$\Gamma = 0.0005$** expôs as deficiências absolutas dos dois esquemas numéricos mais clássicos da fluidodinâmica (UDS e CDS). A escolha desses parâmetros criou o laboratório perfeito para discussão: o número de Péclet celular disparou, escancarando de forma simultânea o defeito de espalhamento artificial do UDS e o defeito de oscilação do CDS. Fica provado que, em regimes fortemente convectivos sem resolução de malha ideal, nenhum dos dois esquemas elementares entrega uma solução que seja fisicamente acurada e termodinamicamente estável ao mesmo tempo.
 
-## 2. Contextualização Física e Numérica
+## 2. A Matemática do Desastre Numérico (Discussão do Péclet)
 
-- **Consistência Física ($\Gamma = 0.001$):** 
-  O fluido simulado possui propriedades altamente convectivas (pouco difusivas). O regresso de $\Gamma$ para 0.001 exige que a malha reproduza frentes de concentração afiadas/abruptas. Conforme a taxa de reação $k$ sobe (0.0 $\rightarrow$ 0.5 $\rightarrow$ 2.0), o decaimento de $\phi_2$ é acentuado, consumindo-o em curtas distâncias de penetração no vórtice, enquanto $\phi_1$ preenche o domínio. Essa física é agora mapeada em alta definição.
+Para entender o que ocorreu nos resultados da malha 100x100, precisamos olhar para as escalas do problema:
+- $\Delta x = \frac{1}{100} = 0.01$
+- $\Gamma = 0.0005$ (O fluido mal se mistura por difusão natural)
+- $U_{max} = 1.0$ (Convecção intensa na tampa)
 
-- **A Discussão do Péclet (Por que o warning voltou?):**
-  Ao retornar para o fluido original $\Gamma = 0.001$, a força da convecção impôs seu desafio novamente.
-  Para a malha $150 \times 150$, temos $\Delta x \approx 0.00667$.
-  O Número de Péclet celular máximo na tampa (onde a velocidade atinge $U \approx 1$) é matematicamente:
-  $$Pe_{max} = \frac{1.0 \times 0.00667}{0.001} \approx 6.67$$
-  O terminal emite o aviso *"Local Peclet number (2.52) exceeds critical value"* porque o código varre o domínio e acusa o primeiro valor que cruza a linha de corte ($Pe > 2.0$). Como $Pe_{max} \approx 6.67$ é substancialmente maior que 2, o **Critério de Scarborough continua sendo violado**.
-  - **CDS (Diferenças Centrais):** Ao violar a dominância diagonal, as equações algébricas produzem coeficientes negativos. Embora o refinamento (Pe caindo de 25 para 6.67) tenha encurtado o "comprimento" das oscilações espaciais, os "wiggles" seguem vivos. O CDS ainda flutuará falsamente em regiões de bordo/camada limite.
-  - **UDS (Upwind):** Este é o grande vencedor da atual configuração. Estável em qualquer Péclet, seu único defeito era a "falsa difusão", que é diretamente proporcional ao tamanho da célula ($\Delta x$). Como encolhemos $\Delta x$ para apenas $0.00667$, o UDS agora gera simulações extremamente nítidas que refletem razoavelmente bem a física de um fluido pouco difusivo (falsa difusão $\approx \Gamma$).
+O **Número de Péclet Celular Máximo** atinge um pico severo:
+$$Pe_{max} = \frac{|u| \Delta x}{\Gamma} = \frac{1.0 \times 0.01}{0.0005} = 20.0$$
 
-## 3. Análise Técnica dos Dados
+*(Nota: O solver acusou `Local Peclet number (2.52)` no log porque ele simplesmente reporta a primeira célula em que $Pe > 2.0$ ao varrer a malha, mas o valor no bordo atinge 20).*
 
-- **Robustez do Solver Temporal:** 
-  Avançar para uma malha de $150 \times 150 \times 2$ escalares significa montar e solucionar enormes matrizes locais a cada passo do tempo até $t=8.0s$. O fato do sistema finalizar sem nenhum erro do `scipy` ou estouro de limite (NaN) atesta perfeitamente o poder e estabilidade do **Método de Euler Implícito**. Se fosse Explícito, o limite restritivo de Courant-Friedrichs-Lewy (CFL) teria colapsado o solver com $dt = 0.1$.
-  
-- **Altíssima Resolução da Camada Limite:** 
-  A malha agora provê pelo menos de 4 a 5 células puramente alojadas dentro da camada limite hidrodinâmica (estimada em $1/\sqrt{Re} = 0.031$). Isso traz as dinâmicas termodinâmicas capturadas ao status de altíssima fidelidade.
+### O Fracasso do CDS (Diferenças Centrais)
+Como $Pe = 20 \gg 2.0$, o CDS sofreu de **extrema violação do Critério de Scarborough**. Matematicamente, a matriz linear perdeu sua dominância diagonal de forma agressiva. 
+**Consequência nos Resultados:** A simulação exibe severas oscilações espúrias (*wiggles*). As frentes de reação não são monótonas; a massa artificialmente flutua gerando bolsões de concentrações impossíveis ($< 0$ ou $> 1$).
 
-## 4. Validação e Conclusão Final
+### A Ilusão do UDS (Upwind)
+O esquema Upwind é sempre incondicionalmente estável, então ele sobrevive a $Pe=20$ sem apresentar *wiggles*. Contudo, sua precisão é de primeira ordem e introduz a **Falsa Difusão**. 
+A falsa difusão do UDS pode ser aproximada por:
+$$\Gamma_{falso} \approx \frac{|u| \Delta x}{2} = \frac{1.0 \times 0.01}{2} = 0.005$$
+**Consequência nos Resultados:** Repare no absurdo físico: A difusão numérica introduzida pelo algoritmo ($\Gamma_{falso} = 0.005$) é **10 VEZES MAIOR** que a difusão física real do fluido ($\Gamma_{real} = 0.0005$). Isso significa que, no UDS, a simulação ignorou a física estipulada no código e comportou-se como um fluido 10 vezes mais difusivo, espalhando toda a massa (borramento extremo dos contornos).
 
-**Os Resultados São Válidos?**
-- Para o **UDS**, sim. O comportamento atualizado une estabilidade total a uma contaminação aceitavelmente baixa por falsa difusão. É o perfil mais seguro a ser considerado real para fins práticos.
-- Para o **CDS**, parcialmente. Os cortes e campos de cores continuarão demonstrando estrias não-físicas onde a velocidade forçada e o cruzamento oblíquo rasgam a diagonal matemática.
+## 3. Comportamento das Reações e da Física Global
 
-### Recomendações Definitivas
-A configuração 150x150 provou que é inviável, em termos práticos, mitigar as instabilidades do CDS por puro "forçamento bruto" de malha (precisaríamos de uma malha 500x500 para ter Péclet $< 2$). A lição computacional fica evidente:
+Mesmo com os defeitos numéricos, a implementação do termo fonte de reação (consumo $-k \phi_2$ e geração $+k \phi_2$) continua funcionando perfeitamente em nível matricial:
+- Quando $k = 0.0$: O transporte é puro, $\phi_2$ é carreado para dentro do vórtice.
+- Quando $k = 0.5$ e $2.0$: Observamos o encurtamento da pluma do reagente. No CDS, vemos isso misturado a oscilações, e no UDS vemos a pluma excessivamente borrada. Contudo, o balanço de geração de $\phi_1$ prova que o método acoplado e implícito no tempo é robusto independentemente dos defeitos do interpolador espacial.
 
-1. **Abandono do CDS Estrito:** CDS nunca deve ser a escolha principal para convecção forte, servindo apenas como bloco constitutivo acadêmico.
-2. **TVD (Total Variation Diminishing):** A solução definitiva e mandatória para escoamentos $Pe \gg 2$ é incorporar um interpolador Upwind de segunda-ordem acoplado a Limitadores de Fluxo (SMART, MUSCL, QUICK), capturando frentes afiadas sem ruidos. 
-3. **Malha Não-Uniforme:** Caso o uso do CDS seja imposto por restrição técnica, a expansão de células baseada em tanh ou seno garantirá densidade (apenas nas paredes) que derrubaria o Pe local, evitando o custo absurdo de uma malha 500x500 uniforme.
+## 4. Conclusão Final e Aprendizados
+
+O teste com **100x100** e **$\Gamma = 0.0005$** é uma obra-prima didática para o CFD. Ele demonstra que:
+1. **O CDS destrói a Matemática (Estabilidade):** Devido às severas oscilações não-físicas causadas pelo Péclet extremo.
+2. **O UDS destrói a Física (Precisão):** Devido à massiva injeção de falsa difusão que suprime o verdadeiro coeficiente do material.
+
+**Qual a solução real na Engenharia e na Academia?**
+Para fugir dessa dicotomia, a fluidodinâmica computacional moderna exige a implementação de Esquemas de Alta Resolução (**TVD - Total Variation Diminishing**). Utilizando esquemas como o **QUICK** acoplado a restritores (*Flux Limiters*), captura-se o perfil nítido do CDS sem engatilhar os wiggles de alta frequência, e sem injetar as toneladas de difusão artificial do UDS. 
+Alternativamente, seria necessário recorrer ao uso de malhas altamente esticadas e não-uniformes para comprimir o $\Delta x$ estritamente contra as bordas onde $|u|$ é altíssimo.
