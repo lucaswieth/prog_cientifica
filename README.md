@@ -13,16 +13,27 @@ $$ \frac{\partial \phi_2}{\partial t} + \nabla \cdot (\vec{u} \phi_2) = \nabla \
 
 Onde:
 - $\phi_2$ é um reagente que entra pela parede superior (Norte).
-- $\phi_1$ é o produto gerado pela reação termoquímica proporcional ao consumo de $\phi_2$.
-- $\Gamma$ é o coeficiente de difusão constante ($\Gamma = 0.001$).
+- $\phi_1$ é o produto gerado pela reação termoquímica proporcional ao consumo de $\phi_2$, mas que também possui uma fonte na parede inferior (Sul).
+- $\Gamma$ é o coeficiente de difusão constante ($\Gamma = 0.0005$, conforme config.py).
 - $k$ é a taxa de reação.
-- $\vec{u}$ é o campo de velocidades (fornecido através de um dataset).
+- $\vec{u}$ é o campo de velocidades (fornecido através de um dataset Lid-Driven Cavity em $Re=1000$).
 
-### Esquemas Numéricos
+### Condições de Contorno
+
+O problema é formulado utilizando **Condições de Contorno de Dirichlet** em todas as fronteiras (paredes rígidas da cavidade), com os seguintes valores prescritos (configurados em `src/config.py`):
+- **Escalar $\phi_1$**: $\phi_1 = 1.0$ na parede Sul, e $\phi_1 = 0.0$ nas paredes Norte, Leste e Oeste.
+- **Escalar $\phi_2$**: $\phi_2 = 1.0$ na parede Norte (tampa móvel onde entra o reagente), e $\phi_2 = 0.0$ nas demais paredes.
+
+**Tratamento no Código (`src/solver.py`):**
+No Método dos Volumes Finitos (FVM) *cell-centered*, os nós da malha ficam no centro do volume. Para aplicar Dirichlet, o fluxo difusivo na face da fronteira é aproximado usando a distância do centro do volume até a face ($\Delta x / 2$ ou $\Delta y / 2$). Isso resulta no coeficiente de difusão sendo multiplicado por 2 na matriz ($a_P \mathrel{+}= 2D$). O fluxo advectivo e difusivo prescrito na fronteira é transferido para o vetor independente $b$ da seguinte forma: $b_P \mathrel{+}= (2D \pm F) \cdot \phi_{contorno}$.
+
+### Esquemas Numéricos e Estabilidade
 
 Foram implementados dois esquemas advectivos (via Padrão *Strategy*):
-- **UDS (Upwind Differencing Scheme):** Incondicionalmente estável, mas de 1ª ordem e com alta difusão numérica.
-- **CDS (Central Differencing Scheme):** De 2ª ordem de precisão espacial, mas suscetível a oscilações não-físicas se o critério de Péclet local superar o limite de estabilidade ($Pe = \frac{u \Delta x}{\Gamma} \le 2$). O solver está configurado para emitir avisos automatizados (warnings) se esse critério for violado.
+- **UDS (Upwind Differencing Scheme):** Incondicionalmente estável (não gera oscilações independentemente do Péclet), mas possui precisão espacial de 1ª ordem. É conhecido por introduzir alta **falsa difusão numérica** (borramento dos resultados).
+- **CDS (Central Differencing Scheme):** Possui precisão espacial de 2ª ordem, mas é **condicionalmente estável**. Se o critério de estabilidade do número de Péclet celular superar o limite ($Pe = \frac{|u| \Delta x}{\Gamma} \le 2$), o esquema viola o critério de Scarborough (perda de dominância diagonal na matriz) e gera oscilações não-físicas (*wiggles*). O solver está configurado para emitir *warnings* se esse critério for violado.
+
+> **Importante:** Para uma discussão profunda sobre convergência, os defeitos do Péclet na malha, wiggles no CDS e falsa difusão no UDS encontrados durante a simulação paramétrica, leia o relatório detalhado em [CONCLUSIONS.md](CONCLUSIONS.md).
 
 ## Estrutura do Projeto (Clean Architecture)
 

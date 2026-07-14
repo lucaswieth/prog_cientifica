@@ -16,7 +16,8 @@ class PostProcessor:
         X, Y = np.meshgrid(grid.x_centros, grid.y_centros, indexing='ij')
 
         fig, ax = plt.subplots(figsize=(7.5, 6))
-        contour = ax.contourf(X, Y, phi_2d, levels=25, cmap='plasma')
+        fixed_levels = np.linspace(-0.01, 1.01, 25)
+        contour = ax.contourf(X, Y, phi_2d, levels=fixed_levels, cmap='plasma', vmin=-0.01, vmax=1.01)
         cbar = fig.colorbar(contour, ax=ax)
         cbar.set_label('Valor de $\\phi$', fontsize=12)
 
@@ -46,17 +47,21 @@ class PostProcessor:
         fig, ax = plt.subplots(figsize=(7.5, 6))
         X, Y = np.meshgrid(grid.x_centros, grid.y_centros, indexing='ij')
         
-        vmax = max([np.max(phi) for phi in historico])
-        vmin = min([np.min(phi) for phi in historico])
-        if vmax == vmin:
-            vmax = vmin + 1.0 
+        vmin, vmax = -0.01, 1.01
+        
+        fixed_levels = np.linspace(vmin, vmax, 25)
             
         U_centros = 0.5 * (grid.u_faces_x[:-1, :] + grid.u_faces_x[1:, :])
         V_centros = 0.5 * (grid.v_faces_y[:, :-1] + grid.v_faces_y[:, 1:])
         
+        # Cria a colorbar usando fixed_levels para evitar que um frame zerado corrompa a escala
+        contour_init = ax.contourf(X, Y, historico[-1], levels=fixed_levels, cmap='plasma', vmin=vmin, vmax=vmax)
+        cbar = fig.colorbar(contour_init, ax=ax)
+        cbar.set_label('Valor de $\\phi$', fontsize=12)
+        
         def update(frame):
             ax.clear()
-            ax.contourf(X, Y, historico[frame], levels=25, cmap='plasma', vmin=vmin, vmax=vmax)
+            ax.contourf(X, Y, historico[frame], levels=fixed_levels, cmap='plasma', vmin=vmin, vmax=vmax)
             ax.streamplot(grid.x_centros, grid.y_centros, U_centros.T, V_centros.T, color='white', linewidth=0.5, density=1.0)
             ax.set_title(f"{titulo} (t = {frame*dt:.2f} s)", fontsize=14, fontweight='bold', pad=15)
             ax.set_xlabel('Coordenada X (m)', fontsize=12)
