@@ -9,8 +9,8 @@ class SimulationConfig:
     """
     
     # Mesh resolution
-    Nx: int = 40
-    Ny: int = 40
+    Nx: int = 150
+    Ny: int = 150
     
     # Physical parameters
     gamma: float = 0.001

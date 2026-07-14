@@ -146,7 +146,3 @@ cython_debug/
 # IDEs
 .vscode/
 .idea/
-
-# Simulation outputs
-results/
-
